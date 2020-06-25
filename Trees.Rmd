@@ -1,0 +1,323 @@
+---
+title: "Trees"
+author: "Mbongiseni Dlamini"
+date: "26/04/2020"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Classification trees
+
+```{r}
+library(tree) #you might want to install the package if you don't have it.
+```
+
+We are going to look at the Advertising data and try to make predictions on whether sales are High or not.
+```{r}
+#load our data and look at it.
+
+#advert <- read.csv('~/Advertising.csv',sep = ",") #load data
+advert <- read.csv('http://faculty.marshall.usc.edu/gareth-james/ISL/Advertising.csv',sep = ",")
+
+advert <- advert[,-1] #remove first column which just has numbers 1-200.
+summary(advert)
+
+```
+
+From the summary we saw that the median sales number is 12.9. Let's decide that anything less than the median is low and greater is high.
+```{r}
+High = ifelse(advert$sales <=8," No"," Yes ")
+advert1 =data.frame(advert ,High)
+head(advert1) # to check our new column
+```
+Cool, now that we have all the columns we need, let's fit our model. First without prunning and then with prunning to compare the results.
+
+# No pruning
+```{r}
+set.seed (1)
+#Begin by splitting our data into training and test sets.
+train= sample(1: nrow(advert1), nrow(advert1)/2) #1/2 data be training set
+advert.test1= advert1[-train ,] #test set
+#advert.test= advert[-train ,] #test set
+High.test=High[-train ] #our target/reponse
+```
+
+```{r}
+advert.tree = tree(High~.-sales,advert1, subset = train) #fit tree
+plot(advert.tree)# plot our tree
+text(advert.tree ,pretty =0) #Tv is the most important predictor.
+tree.pred=predict(advert.tree ,advert.test1 ,type ="class")
+table(tree.pred ,High.test)
+```
+
+```{r}
+accuracy = (9+86)/100
+accuracy
+```
+This is what we expect, a very high accuracy because we are overfitting. Let's prune the tree and see thhe difference:
+
+# With pruning
+```{r}
+#The function cv.tree() performs cross-validation in order to determine the optimal level of tree complexity; cost complexity pruning is used in order to select a sequence of trees for consideration.
+
+#The cv.tree() function reports the number of terminal nodes of each tree considered (size) as well as the corresponding error rate and the value of the cost-complexity parameter used k (our alpha int the text)
+
+set.seed(2)
+advert.cv = cv.tree(advert.tree ,FUN=prune.misclass) # FUN=prune.misclass tells function to use classification error rate and the goal is to pick the tree with the lowest error. We passed unprunned tree.
+
+advert.cv #dev corresponds to the number of misclassifications
+
+```
+Looks like there is a tie between the tree with 3 and 2 terminal nodes.Which corresponds to 3 and 2 regions respectively. Let's pick the tree with more regions. Plot the error
+```{r}
+par(mfrow =c(1,2))
+plot(advert.cv$size ,advert.cv$dev ,type="b")
+plot(advert.cv$k ,advert.cv$dev ,type="b")
+```
+As we increase the size from 1 to 3, our error decreases. As we increase alpha from 0 to 6, our error increases.
+```{r}
+#We now apply the prune.misclass() function in order to prune the tree to obtain the 3- terminal node tree.
+
+advert.prune =prune.misclass(advert.tree ,best = 2) #try changing 2 to 3
+plot(advert.prune)
+text(advert.prune ,pretty =0)
+
+```
+
+```{r}
+#Let's make some predictions to see if the pruned tree does better.
+tree.pred=predict(advert.prune ,advert.test1 ,type ="class")
+table(tree.pred ,High.test)
+```
+
+```{r}
+accuracy = (12+82)/100
+accuracy
+```
+What?? It's less accurate!
+
+What about logistic  regression?
+```{r}
+glm.fits=glm(High∼TV,
+data=advert1 ,family =binomial(link='logit'), subset = train)
+summary (glm.fits)
+y_h <- predict(glm.fits, type = 'response')
+y_h <- ifelse(y_h > 0.5,1,0)
+table(y_h ,High.test)
+```
+```{r}
+ac = (2+80)/100
+ac
+```
+
+Logistic regression did worse!
+
+## Regression Trees
+
+Suppose we were no longer interested in whether or not sales are high or low but we just wanted to predict sales.
+
+As always, we begin by splitting our data into test and training set.
+```{r}
+set.seed (3)
+#Begin by splitting our data into training and test sets.
+train2 = sample(1: nrow(advert), nrow(advert)/2) #1/2 data be training set
+advert.test_2= advert[-train2 ,] #test set
+sales.test_2=advert[-train2, "sales" ] #our target/reponse
+
+```
+
+Fit tree without pruning.
+```{r}
+advert.tree_reg = tree(sales~.,advert, subset = train2) #fit tree
+summary(advert.tree_reg)
+plot(advert.tree_reg)# plot our tree
+text(advert.tree_reg ,pretty =0)
+
+```
+Let's perform cross validation to see the optimal depth.
+```{r}
+cv.advert_reg =cv.tree(advert.tree_reg )
+cv.advert_reg
+plot(cv.advert_reg$size , cv.advert_reg$dev ,type = "b")
+```
+Looks like best is depth = 9.
+```{r}
+advert.prune_2 = prune.tree(advert.tree_reg ,best = 9) 
+plot(advert.prune_2)
+text(advert.prune_2 ,pretty =0)
+```
+
+```{r}
+tree.pred2 = predict(advert.prune_2 ,advert.test_2)
+plot(tree.pred2 ,sales.test_2)
+abline(0,1)
+sqrt(mean((tree.pred2 -sales.test_2)^2))
+```
+
+This model leads to test predictions that are within 1.77 of the actual sales.
+
+## Bagging and random forest
+```{r}
+library(randomForest) #might want to install random forest package first.
+```
+# Some notes on bagging
+Bootstrap or bagging is a general-purpse procedure for reducing the variance of a statistical learning method.It has the effect of reducing the variance and hence improving the prediction accuracy.
+
+How it works:
+
+1) We generate B different bootstapped datasets from our training set.
+2) We fit/train our tree model on each of these bootrapped datasetes. We fit using the recursive splitting method.
+3) 
+a) In a regression tree, we average the predictions from each tree. Recall that each tree predicts the mean of the training observations in that region. We average these. So for example, we will have B different means for Region j, we average those and return the average as the final prediction for Region j.
+
+b) In a classification tree, we record the the class predicted by each of the B trees and take MAJORITY VOTE: the overall prediction is the most commonly occuring class among the the B tree. As an example using our recuring cancer machine, suppose that B-10 trees predict a 'malignant' cancer while 10 predict a 'benign' cancer in region j.Then majority cvote for region j will be 'malignant' supposing B > 20.
+
+# Some notes on random forests
+Improves on bagging by decorrelating the trees. Wait, the trees were correlated? Yes! Recall that the recursive splitting methods chooses the pair(j,s) such that cutting the predictor space into {X|X_j < s} and {X|X_j >= s} (recursively) leads to the greatest possible reduction in RSS.
+
+It stands to reason then that each tree fitted to the bootsrapped data will have the same internal node at the top corresponding to the most imprtant predictor. Hence, the trees are correlated.
+
+Okay, but how do random forets work? They work thus:
+
+1) As in bagging, we generate our B bootstrapped data sets. And begin to fit the tree.
+
+2) However, before each split in the tree is considered, a random sample of m predictors is chosen as split candidates (instead of all p predictors). We choose 1 out of the m.
+3.) A fresh sample of m predictors is taken at the next successive splits with m typically being m=sqrt(p).
+
+Cool, lets see all this in action.
+
+Let's continue on our quest to predict sales
+
+```{r}
+
+#Bagging examples
+set.seed (1)
+bag.advert =randomForest(sales∼.,data=advert ,subset =train2 ,
+mtry=3, importance =TRUE) #mtry = 3 beacuse we have TV,radio and newspaper
+bag.advert
+```
+
+Let's make see what the test error is:
+
+```{r}
+yhat.bag = predict (bag.advert ,newdata = advert.test_2)
+plot(yhat.bag , sales.test_2)
+abline (0,1)
+mean(( yhat.bag - sales.test_2)^2)
+
+```
+
+A the bagging technique has mean squared error of 0.99 which is lower than the 1.77 of the optimally prunned tree. This tells us that having 500 trees vote on what the average is in all the regions is better than creating on big tree and then prunning it. Cool, theory stands up to reality!
+
+```{r}
+importance(bag.advert)
+```
+
+
+```{r}
+# Random forest
+# exactly the sam thing except that we choose mtry= sqrt(p)
+
+set.seed (1)
+random.advert =randomForest(sales∼.,data=advert ,subset =train2 ,
+mtry=sqrt(3), importance =TRUE)
+random.advert
+```
+
+Let's get test error
+```{r}
+yhat.random = predict (random.advert,newdata = advert.test_2)
+plot(yhat.random , sales.test_2)
+abline (0,1)
+mean(( yhat.random - sales.test_2)^2)
+```
+
+We see that the test error was 1.4 > 0.99 for bagging. In this case random forests did not perform better and my suspicion is that it works well when p is large.
+
+Let's look at variable importance:
+```{r}
+importance(random.advert)
+```
+
+## Boosting
+Works like bagging in that we use bootstapped data to fit the tree. However, in this case we fit trees sequentially. Here's how it works:
+
+1) Set f_hat(x) = 0 and r_i = y_i for all i in the training set. The base model just predicts zero.
+
+2) For each tree b in B repeat:
+i) fit a tree f_hat_b(x) with d splits to the data (X,r). So, fit tree with residuals as response.
+
+ii) update base tree by adding a shrunken version of f_hat_b(x) :
+f_hat(x) = f_hat(x) + kf_hat_b(x) #(k = lambda)
+
+iii) Update residuals,
+r_i = r_i - kf_hat_b(x_i)
+
+3) After fitting all the B trees,, we output the final model:
+f_hat(x) = sum(kf_hat_b(x)) from b =1 to b = B.
+
+More congretely, let's think about a bootsted regressio tree for sales.
+We begin by setting the base mode to predict zero for all the observations. The first fitted tree uses the x's and y's from the training data to build a tree. In each region there is a predicted sales value S_j. This model is added to o giving us the model back. Also, this model results in residuals given by (observed value for sales - s_j). So, we update the residuals thus:
+(updated_residuals = (observed value for sales - s_j) = r_i -s_j.
+
+Similar logic in regression except we look at most common class. Residuals corresponding to misclassifications.
+
+
+Alright! Alright! Let's see this in practice!
+
+```{r}
+library(gbm) # you will want to install gbm package.
+```
+
+```{r}
+set.seed (1)
+boost.advert =gbm(sales∼.,data= advert[train2,], distribution=
+"gaussian",n.trees =5000 , interaction.depth =4) # distribution = "bernoulli" for classification.
+
+summary(boost.advert) #variable importance.
+
+```
+```{r}
+#predictions time
+yhat.boost=predict(boost.advert ,newdata = advert.test_2 ,
+n.trees =5000)
+mean(( yhat.boost - sales.test_2)^2)
+```
+Let's play with depth and shrinkage to improve model
+```{r}
+set.seed (1)
+boost.advert =gbm(sales∼.,data= advert[train2,], distribution=
+"gaussian",n.trees =500 , interaction.depth =3) # distribution = "bernoulli" for classification.
+
+summary(boost.advert) #variable importance.
+```
+
+```{r}
+yhat.boost=predict(boost.advert ,newdata = advert.test_2 ,
+n.trees =500)
+mean(( yhat.boost - sales.test_2)^2)
+```
+
+So, looks like the error is a little better than random forests but still worse than bagging.
+
+But how does this compare with linear regression?
+
+```{r}
+library(ISLR)
+library(boot)
+glm.fit1 =lm(sales∼TV+radio+newspaper ,data=advert )
+glm.fit2 =lm(sales∼TV+radio ,data=advert )
+glm.fit3 =lm(sales∼TV ,data=advert )
+
+
+summary (glm.fit1)
+yhat.lm=predict(glm.fit1 ,newdata = advert.test_2)
+mean(( yhat.lm - sales.test_2)^2)
+```
+So, the tree models do better than simple and multiple regression models!
